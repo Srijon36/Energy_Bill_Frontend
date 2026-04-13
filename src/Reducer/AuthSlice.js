@@ -6,7 +6,7 @@ export const login = createAsyncThunk(
   "auth/login",
   async (userInput, { rejectWithValue }) => {
     try {
-      const response = await api.post("/logins/create-login", userInput);
+      const response = await api.post("/api/logins/create-login", userInput);
       if (response?.data?.token) {
         return response.data;
       }
@@ -29,7 +29,7 @@ export const registerUser = createAsyncThunk(
   "auth/register",
   async (userInput, { rejectWithValue }) => {
     try {
-      const response = await api.post("/registers/create-register", userInput);
+      const response = await api.post("/api/registers/create-register", userInput);
       if (response?.data) {
         return response.data;
       }
@@ -61,7 +61,7 @@ export const sendOTP = createAsyncThunk(
   "auth/sendOTP",
   async (email, { rejectWithValue }) => {
     try {
-      const res = await api.post("/forgot-password/send-otp", { email });
+      const res = await api.post("/api/forgot-password/send-otp", { email });
       return res.data;
     } catch (err) {
       return rejectWithValue(
@@ -76,8 +76,8 @@ export const verifyOTP = createAsyncThunk(
   "auth/verifyOTP",
   async ({ email, otp }, { rejectWithValue }) => {
     try {
-      const res = await api.post("/forgot-password/verify-otp", { email, otp });
-      return res.data; // ✅ contains resetToken from backend
+      const res = await api.post("/api/forgot-password/verify-otp", { email, otp });
+      return res.data;
     } catch (err) {
       return rejectWithValue(
         err.response?.data?.message || "Invalid OTP"
@@ -89,9 +89,9 @@ export const verifyOTP = createAsyncThunk(
 // ── RESET PASSWORD ───────────────────────────
 export const resetPassword = createAsyncThunk(
   "auth/resetPassword",
-  async ({ resetToken, newPassword }, { rejectWithValue }) => { // ✅ fixed params
+  async ({ resetToken, newPassword }, { rejectWithValue }) => {
     try {
-      const res = await api.post("/forgot-password/reset-password", {
+      const res = await api.post("/api/forgot-password/reset-password", {
         resetToken,
         newPassword,
       });
@@ -106,11 +106,11 @@ export const resetPassword = createAsyncThunk(
 
 // ── SLICE ────────────────────────────────────
 const initialState = {
-  loading:    false,
-  error:      null,
-  user:       null,
-  token:      null,
-  resetToken: null, // ✅ store resetToken after OTP verify
+  loading: false,
+  error: null,
+  user: null,
+  token: null,
+  resetToken: null,
 };
 
 const AuthSlice = createSlice({
@@ -118,10 +118,10 @@ const AuthSlice = createSlice({
   initialState,
   reducers: {
     logout: (state) => {
-      state.loading    = false;
-      state.error      = null;
-      state.user       = null;
-      state.token      = null;
+      state.loading = false;
+      state.error = null;
+      state.user = null;
+      state.token = null;
       state.resetToken = null;
       sessionStorage.removeItem("energy_token");
     },
@@ -129,94 +129,102 @@ const AuthSlice = createSlice({
   extraReducers: (builder) => {
     builder
 
-      // ── LOGIN ──────────────────────────────
+      // LOGIN
       .addCase(login.pending, (state) => {
         state.loading = true;
-        state.error   = null;
+        state.error = null;
       })
       .addCase(login.fulfilled, (state, { payload }) => {
-  state.loading = false;
-  state.error   = null;
-  state.token   = payload.token;
-  state.user    = payload.user;
-  sessionStorage.setItem("energy_token", JSON.stringify({
-    token: payload.token,
-    user:  payload.user,
-    role:  payload.user?.role,   // ← NEW
-  }));
-})
+        state.loading = false;
+        state.error = null;
+        state.token = payload.token;
+        state.user = payload.user;
+
+        sessionStorage.setItem(
+          "energy_token",
+          JSON.stringify({
+            token: payload.token,
+            user: payload.user,
+            role: payload.user?.role,
+          })
+        );
+      })
       .addCase(login.rejected, (state, { payload }) => {
         state.loading = false;
-        state.error   = payload?.msg || payload?.message ||
+        state.error =
+          payload?.msg ||
+          payload?.message ||
           (typeof payload === "string" ? payload : "Login failed");
       })
 
-      // ── REGISTER ───────────────────────────
+      // REGISTER
       .addCase(registerUser.pending, (state) => {
         state.loading = true;
-        state.error   = null;
+        state.error = null;
       })
       .addCase(registerUser.fulfilled, (state) => {
         state.loading = false;
-        state.error   = null;
+        state.error = null;
       })
       .addCase(registerUser.rejected, (state, { payload }) => {
         state.loading = false;
-        state.error   = payload?.msg || payload?.message ||
+        state.error =
+          payload?.msg ||
+          payload?.message ||
           (typeof payload === "string" ? payload : "Registration failed");
       })
 
-      // ── LOGOUT ─────────────────────────────
+      // LOGOUT
       .addCase(logoutUser.fulfilled, (state) => {
-        state.loading    = false;
-        state.error      = null;
-        state.user       = null;
-        state.token      = null;
+        state.loading = false;
+        state.error = null;
+        state.user = null;
+        state.token = null;
         state.resetToken = null;
       })
 
-      // ── SEND OTP ───────────────────────────
+      // SEND OTP
       .addCase(sendOTP.pending, (state) => {
         state.loading = true;
-        state.error   = null;
+        state.error = null;
       })
       .addCase(sendOTP.fulfilled, (state) => {
         state.loading = false;
-        state.error   = null;
+        state.error = null;
       })
       .addCase(sendOTP.rejected, (state, { payload }) => {
         state.loading = false;
-        state.error   = payload;
+        state.error = payload;
       })
 
-      // ── VERIFY OTP ─────────────────────────
+      // VERIFY OTP
       .addCase(verifyOTP.pending, (state) => {
         state.loading = true;
-        state.error   = null;
+        state.error = null;
       })
       .addCase(verifyOTP.fulfilled, (state, { payload }) => {
-        state.loading    = false;
-        state.error      = null;
-        state.resetToken = payload.resetToken; // ✅ save resetToken in state
+        state.loading = false;
+        state.error = null;
+        state.resetToken = payload.resetToken;
       })
       .addCase(verifyOTP.rejected, (state, { payload }) => {
         state.loading = false;
-        state.error   = payload;
+        state.error = payload;
       })
 
-      // ── RESET PASSWORD ─────────────────────
+      // RESET PASSWORD
       .addCase(resetPassword.pending, (state) => {
         state.loading = true;
-        state.error   = null;
+        state.error = null;
       })
       .addCase(resetPassword.fulfilled, (state) => {
-        state.loading    = false;
-        state.error      = null;
-        state.resetToken = null; // ✅ clear resetToken after use
+        state.loading = false;
+        state.error = null;
+        state.resetToken = null;
       })
       .addCase(resetPassword.rejected, (state, { payload }) => {
         state.loading = false;
-        state.error   = payload;
+        state.error = payload;
       });
   },
 });
