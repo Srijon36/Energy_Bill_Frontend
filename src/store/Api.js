@@ -3,7 +3,7 @@ import axios from "axios";
 const API_BASE = import.meta.env.VITE_API_URL;
 
 if (!API_BASE) {
-  console.error("❌ API URL is missing in .env");
+  console.error("❌ API URL missing in .env");
 }
 
 const api = axios.create({
@@ -11,11 +11,12 @@ const api = axios.create({
   withCredentials: true,
 });
 
+// Routes using FormData
 const formDataURLs = ["/uploads/upload-bill"];
 
 api.interceptors.request.use(
   (req) => {
-    // 🔐 Token
+    // 🔐 Attach token
     try {
       const stored = sessionStorage.getItem("energy_token");
       const parsed = stored ? JSON.parse(stored) : null;
@@ -26,7 +27,7 @@ api.interceptors.request.use(
       }
     } catch {}
 
-    // 📦 Content-Type
+    // 📦 Content-Type handling
     const isFormData = formDataURLs.some((url) =>
       req.url?.includes(url)
     );
