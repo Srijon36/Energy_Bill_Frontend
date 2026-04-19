@@ -1,12 +1,12 @@
 import { createAsyncThunk, createSlice } from "@reduxjs/toolkit";
 import api from "../store/Api";
 
-// LOGIN
+// ── LOGIN ────────────────────────────────────
 export const login = createAsyncThunk(
   "auth/login",
   async (userInput, { rejectWithValue }) => {
     try {
-      const response = await api.post("logins/create-login", userInput); // ✅ FIXED
+      const response = await api.post("logins/create-login", userInput);
       return response.data;
     } catch (error) {
       return rejectWithValue(
@@ -18,12 +18,12 @@ export const login = createAsyncThunk(
   }
 );
 
-// REGISTER
+// ── REGISTER ─────────────────────────────────
 export const registerUser = createAsyncThunk(
   "auth/register",
   async (userInput, { rejectWithValue }) => {
     try {
-      const response = await api.post("registers/create-register", userInput); // ✅ FIXED
+      const response = await api.post("registers/create-register", userInput);
       return response.data;
     } catch (error) {
       return rejectWithValue(
@@ -35,12 +35,12 @@ export const registerUser = createAsyncThunk(
   }
 );
 
-// SEND OTP
+// ── SEND OTP ─────────────────────────────────
 export const sendOTP = createAsyncThunk(
   "auth/sendOTP",
   async (email, { rejectWithValue }) => {
     try {
-      const res = await api.post("forgot-password/send-otp", { email }); // ✅ FIXED
+      const res = await api.post("forgot-password/send-otp", { email });
       return res.data;
     } catch (err) {
       return rejectWithValue(err.response?.data?.message);
@@ -48,12 +48,12 @@ export const sendOTP = createAsyncThunk(
   }
 );
 
-// VERIFY OTP
+// ── VERIFY OTP ───────────────────────────────
 export const verifyOTP = createAsyncThunk(
   "auth/verifyOTP",
   async ({ email, otp }, { rejectWithValue }) => {
     try {
-      const res = await api.post("forgot-password/verify-otp", { email, otp }); // ✅ FIXED
+      const res = await api.post("forgot-password/verify-otp", { email, otp });
       return res.data;
     } catch (err) {
       return rejectWithValue(err.response?.data?.message);
@@ -61,7 +61,7 @@ export const verifyOTP = createAsyncThunk(
   }
 );
 
-// RESET PASSWORD
+// ── RESET PASSWORD ───────────────────────────
 export const resetPassword = createAsyncThunk(
   "auth/resetPassword",
   async ({ resetToken, newPassword }, { rejectWithValue }) => {
@@ -69,7 +69,7 @@ export const resetPassword = createAsyncThunk(
       const res = await api.post("forgot-password/reset-password", {
         resetToken,
         newPassword,
-      }); // ✅ FIXED
+      });
       return res.data;
     } catch (err) {
       return rejectWithValue(err.response?.data?.message);
@@ -77,7 +77,7 @@ export const resetPassword = createAsyncThunk(
   }
 );
 
-// SLICE
+// ── SLICE ────────────────────────────────────
 const AuthSlice = createSlice({
   name: "auth",
   initialState: {
@@ -95,6 +95,7 @@ const AuthSlice = createSlice({
   },
   extraReducers: (builder) => {
     builder
+      // LOGIN
       .addCase(login.pending, (state) => {
         state.loading = true;
         state.error = null;
@@ -119,5 +120,17 @@ const AuthSlice = createSlice({
   },
 });
 
+// ✅ EXPORT ACTION FIRST
 export const { logout } = AuthSlice.actions;
+
+// ── LOGOUT USER (AFTER logout is defined) ─────────────────────
+export const logoutUser = createAsyncThunk(
+  "auth/logoutUser",
+  async (_, { dispatch }) => {
+    sessionStorage.removeItem("energy_token");
+    dispatch(logout());
+  }
+);
+
+// ✅ EXPORT REDUCER
 export default AuthSlice.reducer;
