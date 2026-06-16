@@ -9,8 +9,9 @@ const Home = () => {
         <div className="hero-badge-new">● PROVEN BILL ANALYSIS SYSTEM</div>
 
         <h1 className="hero-title-new">
-          Optimize Your<br />
-          <span className="hero-title-green">Energy Bill</span><br />
+          Optimize Your{" "}
+          <span className="hero-title-green">Energy Bill</span>
+          <br />
           <span className="hero-title-ghost">for Savings</span>
         </h1>
 

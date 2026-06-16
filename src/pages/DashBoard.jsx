@@ -4,6 +4,7 @@ import { getAllBills } from "../Reducer/BillSlice";
 import { useNavigate } from "react-router-dom";
 import { predictNextBill } from "../Reducer/AnalysisSlice";
 import { getApplianceProfile } from "../Reducer/ApplianceSlice";
+import { useTranslation } from "react-i18next";
 import BillSummary      from "./BillSummary";
 import SavingsCard      from "./SavingsCard";
 import UsageInsights    from "./UsageInsights";
@@ -21,20 +22,120 @@ const APPLIANCE_COLORS = [
   "#ef4444","#8b5cf6","#ec4899","#06b6d4","#f97316"
 ];
 
-const calculateGenericBreakdown = (totalUnits, netAmount) => {
+/* ─── Season helpers ──────────────────────────────────────────── */
+
+// Parse billMonth string → 1-12 (handles "December 2024", "2024-12", ISO dates, etc.)
+const getMonthNumber = (billMonth) => {
+  if (!billMonth) return null;
+  const MONTHS = ["jan","feb","mar","apr","may","jun","jul","aug","sep","oct","nov","dec"];
+  const lower  = String(billMonth).toLowerCase();
+  for (let i = 0; i < MONTHS.length; i++) {
+    if (lower.includes(MONTHS[i])) return i + 1;
+  }
+  // ISO / numeric formats
+  const d = new Date(billMonth);
+  if (!isNaN(d.getTime())) return d.getMonth() + 1;
+  const m = lower.match(/(\d{1,2})[\/-](\d{2,4})/);
+  if (m) { const n = parseInt(m[1]); if (n >= 1 && n <= 12) return n; }
+  return null;
+};
+
+// Returns "winter", "summer", or "transition"
+const getSeason = (month) => {
+  if (!month) return "transition";
+  if ([11, 12, 1, 2].includes(month)) return "winter";
+  if ([4,  5,  6, 7, 8, 9].includes(month)) return "summer";
+  return "transition"; // March, October
+};
+
+const SEASON_META = {
+  winter:     { label: "❄️ Winter",     color: "#3b82f6", bg: "#eff6ff", border: "#bfdbfe" },
+  summer:     { label: "☀️ Summer",     color: "#f59e0b", bg: "#fffbeb", border: "#fde68a" },
+  transition: { label: "🍂 Transition", color: "#22c55e", bg: "#f0fdf4", border: "#86efac" },
+};
+
+// Hours-per-day per appliance per season for GENERIC breakdown
+const SEASONAL_HOURS = {
+  summer: {
+    "Air Conditioner": 9,
+    "Refrigerator":    24,
+    "Television":       6,
+    "Washing Machine":  1,
+    "Fan":             12,
+    "LED Bulbs":        6,
+    "Water Heater":    0.3,
+    "Immersion Rod":   0,
+    "Others":           4,
+  },
+  winter: {
+    "Air Conditioner": 0,    // not used in winter
+    "Refrigerator":    20,
+    "Television":       7,   // more indoor time
+    "Washing Machine":  1,
+    "Fan":             0.5,  // rarely used
+    "LED Bulbs":        9,   // shorter days → more lighting
+    "Water Heater":    3.5,  // heavy usage
+    "Immersion Rod":   3.5,
+    "Others":           4,
+  },
+  transition: {
+    "Air Conditioner": 3,
+    "Refrigerator":    22,
+    "Television":       6,
+    "Washing Machine":  1,
+    "Fan":              7,
+    "LED Bulbs":        7,
+    "Water Heater":    1.5,
+    "Immersion Rod":   1.5,
+    "Others":           4,
+  },
+};
+
+// Seasonal multiplier applied to USER's saved hours/day
+const getSeasonalMultiplier = (name, season) => {
+  const n = (name || "").toLowerCase();
+  if (n.includes("air con") || n.includes(" ac") || n === "ac")
+    return { winter: 0, transition: 0.35, summer: 1 }[season];
+  if (n.includes("fan") || n.includes("cooler"))
+    return { winter: 0.04, transition: 0.55, summer: 1 }[season];
+  if (n.includes("immersion") || n.includes("geyser") || n.includes("water heat") || n.includes("rod"))
+    return { winter: 1, transition: 0.35, summer: 0.1 }[season];
+  if (n.includes("heater") && !n.includes("water"))
+    return { winter: 1, transition: 0.2, summer: 0.05 }[season];
+  return 1; // neutral appliances (fridge, TV, washing machine, etc.) unchanged
+};
+
+/* ─── Generic breakdown (no saved profile) ───────────────────── */
+const calculateGenericBreakdown = (totalUnits, netAmount, month) => {
   if (!totalUnits || totalUnits === 0) return [];
   const costPerUnit = (netAmount || 0) / totalUnits;
-  const appliances = [
-    { name:"Air Conditioner", icon:"❄️", watt:1500, hours:8  },
-    { name:"Refrigerator",    icon:"🧊", watt:150,  hours:24 },
-    { name:"Television",      icon:"📺", watt:100,  hours:6  },
-    { name:"Washing Machine", icon:"🫧", watt:500,  hours:1  },
-    { name:"Fan",             icon:"🌀", watt:75,   hours:12 },
-    { name:"LED Bulbs",       icon:"💡", watt:40,   hours:8  },
-    { name:"Others",          icon:"🔌", watt:200,  hours:4  },
+  const season = getSeason(month);
+  const hours  = SEASONAL_HOURS[season];
+
+  // Base appliance list — water heater / immersion rod added for non-summer seasons
+  const baseAppliances = [
+    { name:"Air Conditioner", icon:"❄️",  watt:1500 },
+    { name:"Refrigerator",    icon:"🧊",  watt:150  },
+    { name:"Television",      icon:"📺",  watt:100  },
+    { name:"Washing Machine", icon:"🫧",  watt:500  },
+    { name:"Fan",             icon:"🌀",  watt:75   },
+    { name:"LED Bulbs",       icon:"💡",  watt:40   },
+    ...(season !== "summer"
+      ? [{ name:"Water Heater", icon:"🔥", watt:2000 }]
+      : []
+    ),
+    { name:"Others",          icon:"🔌",  watt:200  },
   ];
-  const raw      = appliances.map(a => ({ ...a, rawKwh:(a.watt*a.hours*30)/1000 }));
+
+  // Apply seasonal hours, drop appliances with 0 hours
+  const active = baseAppliances
+    .map(a => ({ ...a, hours: hours[a.name] ?? 0 }))
+    .filter(a => a.hours > 0);
+
+  const raw      = active.map(a => ({ ...a, rawKwh:(a.watt*a.hours*30)/1000 }));
   const totalRaw = raw.reduce((s,a) => s+a.rawKwh, 0);
+  if (!totalRaw) return [];
+
   return raw.map(a => {
     const units   = parseFloat(((a.rawKwh/totalRaw)*totalUnits).toFixed(1));
     const percent = parseFloat(((a.rawKwh/totalRaw)*100).toFixed(1));
@@ -42,18 +143,29 @@ const calculateGenericBreakdown = (totalUnits, netAmount) => {
   });
 };
 
-const calculateRealBreakdown = (appliances, totalUnits, netAmount) => {
+/* ─── Real breakdown (user saved profile) ────────────────────── */
+const calculateRealBreakdown = (appliances, totalUnits, netAmount, month) => {
   if (!appliances?.length || !totalUnits || !netAmount) return [];
   const costPerUnit = netAmount / totalUnits;
-  const raw = appliances.map(a => ({
-    ...a, rawKwh:(a.wattage*a.quantity*a.hoursPerDay*30)/1000,
-  }));
-  const totalRaw = raw.reduce((s,a) => s+a.rawKwh, 0);
-  return raw.map(a => {
+  const season      = getSeason(month);
+
+  // Apply seasonal multiplier to each appliance's hours
+  const adjusted = appliances
+    .map(a => {
+      const mult          = getSeasonalMultiplier(a.name, season);
+      const adjustedHours = parseFloat((a.hoursPerDay * mult).toFixed(2));
+      return { ...a, adjustedHours, rawKwh:(a.wattage*a.quantity*adjustedHours*30)/1000 };
+    })
+    .filter(a => a.rawKwh > 0); // hide appliances with 0 usage this season
+
+  const totalRaw = adjusted.reduce((s,a) => s+a.rawKwh, 0);
+  if (!totalRaw) return [];
+
+  return adjusted.map(a => {
     const units   = parseFloat(((a.rawKwh/totalRaw)*totalUnits).toFixed(1));
     const percent = parseFloat(((a.rawKwh/totalRaw)*100).toFixed(1));
     const cost    = Math.round(units*costPerUnit);
-    return { name:a.name, icon:a.icon||"🔌", units, percent, cost, qty:a.quantity, hrs:a.hoursPerDay };
+    return { name:a.name, icon:a.icon||"🔌", units, percent, cost, qty:a.quantity, hrs:a.adjustedHours };
   });
 };
 
@@ -181,6 +293,7 @@ const TrendBadge = ({ trend, pct }) => {
 const Dashboard = () => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
+  const { t } = useTranslation();
 
   const { bills, loading, error }                                          = useSelector(s => s.bill);
   const { profile }                                                        = useSelector(s => s.appliance);
@@ -232,9 +345,12 @@ const Dashboard = () => {
     </div>
   );
 
+  const billMonthNum  = getMonthNumber(data?.billMonth);
+  const season        = getSeason(billMonthNum);
+  const seasonMeta    = SEASON_META[season];
   const applianceData = profile?.appliances
-    ? calculateRealBreakdown(profile.appliances, unitsBilled, netAmount)
-    : calculateGenericBreakdown(unitsBilled, netAmount);
+    ? calculateRealBreakdown(profile.appliances, unitsBilled, netAmount, billMonthNum)
+    : calculateGenericBreakdown(unitsBilled, netAmount, billMonthNum);
   const isRealData = !!profile?.appliances;
 
   const formattedTime = generatedAt
@@ -247,9 +363,9 @@ const Dashboard = () => {
       {/* Header */}
       <div className="dash-header">
         <div className="dash-header-left">
-          <h2>Dashboard</h2>
+          <h2>{t("dashTitle")}</h2>
           <div className="dash-meta">
-            <span className="meta-item"><UserIcon/> Welcome back, <strong>{data.customerName}</strong></span>
+            <span className="meta-item"><UserIcon/> {t("welcomeBack2")}, <strong>{data.customerName}</strong></span>
             <span className="meta-sep"/>
             <span className="meta-item"><HashIcon/> Customer ID: <strong>{data.consumerNumber}</strong></span>
             <span className="meta-sep"/>
@@ -259,7 +375,7 @@ const Dashboard = () => {
         <div className="dash-header-btns">
           <DownloadReport data={data}/>
           <button className="dash-upload-btn" onClick={() => navigate("/upload")}>
-            <UploadIcon/> Upload New Bill
+            <UploadIcon/> {t("uploadNewBill")}
           </button>
         </div>
       </div>
@@ -280,7 +396,7 @@ const Dashboard = () => {
         {/* Card 1 — Units Consumed (dark navy) */}
         <div className="kpi-card kpi-blue">
           <div className="kpi-icon-box kpi-icon-blue"><Bolt/></div>
-          <div className="kpi-label">Units Consumed</div>
+          <div className="kpi-label">{t("unitsConsumed")}</div>
           <div className="kpi-value kpi-val-blue">{unitsBilled} <span className="kpi-unit">kWh</span></div>
           <span className="kpi-badge neutral">&#8377;{costPerUnit}/unit</span>
         </div>
@@ -288,7 +404,7 @@ const Dashboard = () => {
         {/* Card 2 — Total Bill (white) */}
         <div className="kpi-card kpi-dark">
           <div className="kpi-icon-box kpi-icon-dark"><CardIcon/></div>
-          <div className="kpi-label">Total Bill</div>
+          <div className="kpi-label">{t("totalBill")}</div>
           <div className="kpi-value kpi-val-dark">&#8377;{netAmount.toLocaleString("en-IN")}</div>
           <span className="kpi-badge warn">Gross &#8377;{grossAmount.toLocaleString("en-IN")}</span>
         </div>
@@ -296,7 +412,7 @@ const Dashboard = () => {
         {/* Card 3 — Rebate Savings (NOW DARK / BLACK) */}
         <div className="kpi-card kpi-blue">
           <div className="kpi-icon-box kpi-icon-blue"><Rupee/></div>
-          <div className="kpi-label">Rebate Savings</div>
+          <div className="kpi-label">{t("rebateSavings")}</div>
           <div className="kpi-value kpi-val-blue">&#8377;{saved.toLocaleString("en-IN")}</div>
           <span className="kpi-badge up">+{percent}% saved</span>
         </div>
@@ -304,7 +420,7 @@ const Dashboard = () => {
         {/* Card 4 — Yearly Projection (white) */}
         <div className="kpi-card kpi-teal">
           <div className="kpi-icon-box kpi-icon-teal"><TrendUp/></div>
-          <div className="kpi-label">Yearly Projection</div>
+          <div className="kpi-label">{t("yearlyProjection")}</div>
           <div className="kpi-value kpi-val-teal">&#8377;{yearlySavings.toLocaleString("en-IN")}</div>
           <span className="kpi-badge up">Based on this bill</span>
         </div>
@@ -328,13 +444,25 @@ const Dashboard = () => {
           </span>
           Appliance Cost Breakdown
         </h3>
+
+        {/* Season badge */}
+        <div style={{
+          display:"inline-flex", alignItems:"center", gap:"8px",
+          background: seasonMeta.bg, border:`1px solid ${seasonMeta.border}`,
+          borderRadius:"99px", padding:"5px 14px",
+          fontSize:"12px", fontWeight:700, color: seasonMeta.color,
+          marginBottom:"14px",
+        }}>
+          {seasonMeta.label} season detected from {data.billMonth}
+        </div>
+
         <p style={{ fontSize:"12px", color:"#94a3b8", marginBottom:"16px" }}>
           {isRealData
-            ? `Based on your ${profile.consumerType} appliance profile`
-            : "Generic estimate — fill your appliance profile for accuracy"}
+            ? `Adjusted for ${season} season — your ${profile.consumerType} appliance profile`
+            : `${season === "winter" ? "❄️ AC hidden, Water Heater boosted" : season === "summer" ? "☀️ AC active, Heaters hidden" : "🍂 Mixed season estimate"} · Generic — `}
           {!isRealData && (
-            <a href="/appliances" style={{ color:"#22c55e", fontWeight:700, marginLeft:"6px" }}>
-              Fill now →
+            <a href="/appliances" style={{ color:"#22c55e", fontWeight:700 }}>
+              fill profile for accuracy →
             </a>
           )}
         </p>
@@ -359,9 +487,13 @@ const Dashboard = () => {
                       <span style={{ fontSize:"18px" }}>{item.icon}</span>
                       <span style={{ fontSize:"13px", fontWeight:600, color:"#0f172a" }}>
                         {item.name}
-                        {item.qty && (
+                        {item.qty != null && (
                           <span style={{ color:"#94a3b8", fontWeight:400, fontSize:"11px" }}>
-                            {" "}({item.qty} unit{item.qty>1?"s":""}, {item.hrs}hrs/day)
+                            {" "}({item.qty} unit{item.qty>1?"s":""},{" "}
+                            {parseFloat(item.hrs) < 1
+                              ? `${Math.round(parseFloat(item.hrs)*60)} min/day`
+                              : `${item.hrs} hrs/day`}
+                            {parseFloat(item.hrs) === 0 ? " · seasonal off" : ""})
                           </span>
                         )}
                       </span>
